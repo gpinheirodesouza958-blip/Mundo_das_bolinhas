@@ -1,12 +1,13 @@
+
 {
   "background_color": "#000000",
   "dir": "ltr",
   "display": "standalone",
   "name": "Mundo das Bolinhas",
   "orientation": "any",
-  "scope": "/",
+  "scope": "/Mundo_das_bolinhas/",
   "short_name": "Mundo das Bolinhas",
-  "start_url": "/",
+  "start_url": "/Mundo_das_bolinhas/",
   "theme_color": "#000000",
   "id": "/Mundo_das_bolinhas/",
   "description": "Um mundo 2D de bolinhas coloridas que exploram, coletam alimentos e metais, constroem casas e formam uma civilização. Observe o crescimento desse mundo e descubra o que acontece!",

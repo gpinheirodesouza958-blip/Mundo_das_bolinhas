@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mundo das Bolinhas</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: #101827; color: #f4f7ff;
+    font-family: Arial, sans-serif; text-align: center;
+  }
+  header { padding: 14px 10px 8px; }
+  h1 { margin: 0 0 8px; color: #ffe66d; font-size: clamp(22px, 5vw, 32px); }
+  #stats { display:flex; flex-wrap:wrap; justify-content:center; gap:8px; font-size:14px; }
+  .stat { background:#202d43; border:1px solid #40516d; border-radius:8px; padding:7px 10px; }
+  main { max-width: 900px; margin:auto; padding: 8px 12px 20px; }
+  canvas {
+    display:block; width:100%; height:auto; aspect-ratio: 8 / 5;
+    background:#172d2a; border:3px solid #8295a8; border-radius:10px;
+    image-rendering: pixelated; touch-action: manipulation;
+  }
+  .controls { display:flex; flex-wrap:wrap; justify-content:center; gap:8px; margin:12px 0; }
+  button {
+    border:0; border-radius:9px; padding:11px 14px; color:#101827;
+    background:#ffe66d; font-weight:bold; font-size:14px; cursor:pointer;
+  }
+  button:active { transform:scale(.97); }
+  button.secondary { background:#a9d6ff; }
+  button.danger { background:#ff9b9b; }
+  #message { min-height:22px; color:#c8d6e8; font-size:14px; }
+  .note { color:#aebbd0; font-size:12px; line-height:1.5; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🌍 Mundo das Bolinhas</h1>
+  <div id="stats">
+    <span class="stat">🔵 Criaturas: <b id="population">2</b></span>
+    <span class="stat">🍊 Comidas: <b id="foodCount">0</b></span>
+    <span class="stat">⚙️ Metais: <b id="metalCount">0</b></span>
+    <span class="stat">🏠 Casas: <b id="houseCount">0</b></span>
+  </div>
+</header>
+<main>
+  <canvas id="world" width="800" height="500" aria-label="Mundo 2D das bolinhas"></canvas>
+  <div class="controls">
+    <button id="toggle">⏸ Pausar</button>
+    <button id="speed" class="secondary">⏩ Velocidade: 1x</button>
+    <button id="add" class="secondary">＋ Criar bolinha</button>
+    <button id="food" class="secondary">🍊 Adicionar comida</button>
+    <button id="metal" class="secondary">⚙️ Adicionar metal</button>
+    <button id="storm" class="danger">🌪️ Furacão</button>
+    <button id="quake" class="danger">〰️ Terremoto</button>
+    <button id="restart">↻ Novo mundo</button>
+  </div>
+  <div id="message">As bolinhas procuram comida e metais sozinhas. Observe a simulação!</div>
+  <p class="note">Protótipo inicial: toque no mapa para adicionar comida. As criaturas se reproduzem quando estão alimentadas e próximas.</p>
+</main>
+<script>
+(() => {
+  const canvas = document.getElementById('world');
+  const ctx = canvas.getContext('2d');
+  const $ = id => document.getElementById(id);
+  const W = canvas.width, H = canvas.height;
+  let creatures = [], foods = [], metals = [], houses = [];
+  let running = true, speed = 1, tick = 0, storm = 0, quake = 0;
+  let lastTime = 0, accumulator = 0;
+  const colors = ['#38a9ff','#ffe34d','#ff6262','#bd82ff','#ff9d43','#55dc91'];
+  const mix = {
+    '#38a9ff|#ffe34d':'#55dc91',
+    '#ff6262|#ffe34d':'#ff9d43',
+    '#38a9ff|#ff6262':'#bd82ff'
+  };
+  const rand = (a,b) => a + Math.random()*(b-a);
+  const clamp = (v,a,b) => Math.max(a,Math.min(b,v));
+  function makeCreature(x=rand(25,W-25), y=rand(25,H-25), color=colors[Math.floor(Math.random()*colors.length)]) {
+    creatures.push({x,y,vx:rand(-.7,.7),vy:rand(-.7,.7),color,energy:75,age:0,breed:0,r:10});
+  }
+  function addFood(x=rand(12,W-12),y=rand(12,H-12)) { foods.push({x,y}); }
+  function addMetal(x=rand(12,W-12),y=rand(12,H-12)) { metals.push({x,y}); }
+  function reset() {
+    creatures=[]; foods=[]; metals=[]; houses=[]; tick=0; storm=0; quake=0;
+    makeCreature(300,240,'#38a9ff'); makeCreature(500,260,'#ffe34d');
+    for(let i=0;i<32;i++) addFood();
+    for(let i=0;i<22;i++) addMetal();
+    say('Novo mundo criado! Duas criaturas começaram a explorar.');
+    updateStats();
+  }
+  function say(s) { $('message').textContent=s; }
+  function updateStats() {
+    $('population').textContent=creatures.length;
+    $('foodCount').textContent=foods.length;
+    $('metalCount').textContent=metals.length;
+    $('houseCount').textContent=houses.length;
+  }
+  function nearest(list,c) {
+    let best=-1, d=Infinity;
+    for(let i=0;i<list.length;i++) {
+      const dx=list[i].x-c.x, dy=list[i].y-c.y, dd=dx*dx+dy*dy;
+      if(dd<d){d=dd;best=i;}
+    }
+    return best;
+  }
+  function step() {
+    tick++;
+    if(storm>0) storm--;
+    if(quake>0) quake--;
+    for(const c of creatures) {
+      c.age++; c.energy-=0.018;
+      let target=null, targetList=null;
+      if(c.energy<65 && foods.length){targetList=foods; target=foods[nearest(foods,c)];}
+      else if(metals.length && c.energy>35){targetList=metals; target=metals[nearest(metals,c)];}
+      if(target) {
+        const dx=target.x-c.x, dy=target.y-c.y, d=Math.hypot(dx,dy)||1;
+        c.vx += dx/d*.055; c.vy += dy/d*.055;
+      } else {
+        c.vx += rand(-.07,.07); c.vy += rand(-.07,.07);
+      }
+      if(storm>0) { c.vx += rand(-.35,.35); c.vy += rand(-.35,.35); }
+      if(quake>0) { c.vx += rand(-.15,.15); c.vy += rand(-.15,.15); }
+      const v=Math.hypot(c.vx,c.vy)||1, max=.95;
+      if(v>max){c.vx=c.vx/v*max;c.vy=c.vy/v*max;}
+      c.x=clamp(c.x+c.vx,12,W-12); c.y=clamp(c.y+c.vy,12,H-12);
+      c.vx*=.985; c.vy*=.985;
+      if(target && Math.hypot(target.x-c.x,target.y-c.y)<14) {
+        const i=targetList.indexOf(target);
+        if(i>=0) {
+          targetList.splice(i,1);
+          if(targetList===foods) c.energy=Math.min(100,c.energy+32);
+          else c.energy=Math.min(100,c.energy+4);
+        }
+      }
+      // Construir uma casa a cada 10 metais recolhidos por esta criatura.
+      c.metal=(c.metal||0);
+      if(c.metal>=10) { houses.push({x:c.x,y:c.y,floors:Math.max(1,Math.floor(c.metal/10))}); c.metal-=10; }
+    }
+    // Recolhimento de metal próximo.
+    for(const c of creatures) {
+      const i=nearest(metals,c);
+      if(i>=0 && Math.hypot(metals[i].x-c.x,metals[i].y-c.y)<13) {
+        metals.splice(i,1); c.metal=(c.metal||0)+1;
+      }
+    }
+    // Reprodução: duas criaturas próximas, alimentadas e com intervalo.
+    for(let i=0;i<creatures.length && creatures.length<45;i++) {
+      const a=creatures[i]; a.breed=Math.max(0,a.breed-1);
+      if(a.energy<78 || a.breed>0) continue;
+      for(let j=i+1;j<creatures.length;j++) {
+        const b=creatures[j];
+        if(b.energy>=78 && b.breed<=0 && Math.hypot(a.x-b.x,a.y-b.y)<22) {
+          const key=[a.color,b.color].sort().join('|');
+          const childColor=mix[key] || (Math.random()<.5?a.color:b.color);
+          makeCreature((a.x+b.x)/2+rand(-8,8),(a.y+b.y)/2+rand(-8,8),childColor);
+          a.energy-=25; b.energy-=25; a.breed=b.breed=900;
+          break;
+        }
+      }
+    }
+    // Criaturas sem energia desaparecem.
+    const before=creatures.length;
+    creatures=creatures.filter(c=>c.energy>0);
+    if(before>0 && creatures.length===0) say('Extinção! Use “Criar bolinha” para iniciar uma nova população.');
+    // Recursos reaparecem lentamente.
+    if(tick%100===0 && foods.length<45) addFood();
+    if(tick%180===0 && metals.length<35) addMetal();
+    if(tick%30===0) updateStats();
+  }
+  function draw() {
+    ctx.fillStyle='#18332d'; ctx.fillRect(0,0,W,H);
+    // Padrão de pontos do cenário, estilo arcade.
+    ctx.fillStyle='#315447';
+    for(let x=20;x<W;x+=40) for(let y=20;y<H;y+=40) ctx.fillRect(x,y,2,2);
+    // Casas
+    for(const h of houses) {
+      ctx.fillStyle='#b77a48'; ctx.fillRect(h.x-9,h.y-8,18,16);
+      ctx.fillStyle='#f0c77b'; ctx.fillRect(h.x-6,h.y-5,12,10);
+      ctx.fillStyle='#70452e'; ctx.fillRect(h.x-2,h.y+1,4,7);
+      ctx.fillStyle='#e6a85d'; ctx.fillRect(h.x-8,h.y-11,16,3);
+      if(h.floors>1) ctx.fillText('▰'.repeat(Math.min(h.floors,5)),h.x-8,h.y-13);
+    }
+    // Comida laranja
+    for(const f of foods) { ctx.fillStyle='#ff9c32'; ctx.beginPath();ctx.arc(f.x,f.y,4,0,Math.PI*2);ctx.fill(); }
+    // Metais cinza
+    for(const m of metals) { ctx.fillStyle='#b8c2cc';ctx.fillRect(m.x-4,m.y-4,8,8);ctx.fillStyle='#eef2f5';ctx.fillRect(m.x-2,m.y-2,3,3); }
+    // Criaturas
+    for(const c of creatures) {
+      ctx.fillStyle=c.color;ctx.beginPath();ctx.arc(c.x,c.y,c.r,0,Math.PI*2);ctx.fill();
+      ctx.strokeStyle='#17202b';ctx.lineWidth=2;ctx.stroke();
+      ctx.fillStyle='#15202b';ctx.beginPath();ctx.arc(c.x-3,c.y-2,1.5,0,Math.PI*2);ctx.arc(c.x+3,c.y-2,1.5,0,Math.PI*2);ctx.fill();
+      // Pequena barra de energia
+      ctx.fillStyle='#303b45';ctx.fillRect(c.x-9,c.y-16,18,3);
+      ctx.fillStyle='#7be08b';ctx.fillRect(c.x-9,c.y-16,18*clamp(c.energy/100,0,1),3);
+    }
+    if(storm>0) {
+      ctx.fillStyle='rgba(180,210,230,.16)';ctx.fillRect(0,0,W,H);
+      ctx.strokeStyle='rgba(220,240,255,.65)';ctx.lineWidth=2;
+      for(let i=0;i<14;i++){let x=(i*73+tick*7)%W,y=(i*47+tick*11)%H;ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x-12,y+18);ctx.stroke();}
+      ctx.fillStyle='#fff';ctx.font='bold 16px Arial';ctx.fillText('FURACÃO!',12,24);
+    }
+    if(quake>0) {
+      ctx.fillStyle='rgba(255,220,100,.12)';ctx.fillRect(0,0,W,H);
+      ctx.fillStyle='#fff';ctx.font='bold 16px Arial';ctx.fillText('TERREMOTO!',12,24);
+    }
+    if(!running) {
+      ctx.fillStyle='rgba(0,0,0,.48)';ctx.fillRect(0,0,W,H);
+      ctx.fillStyle='#fff';ctx.font='bold 32px Arial';ctx.textAlign='center';ctx.fillText('PAUSADO',W/2,H/2);ctx.textAlign='left';
+    }
+  }
+  function frame(time) {
+    if(!lastTime) lastTime=time;
+    const delta=Math.min(100,time-lastTime); lastTime=time;
+    if(running) {
+      accumulator+=delta*speed;
+      while(accumulator>=16.67){step();accumulator-=16.67;}
+    }
+    draw(); requestAnimationFrame(frame);
+  }
+  $('toggle').onclick=()=>{running=!running;$('toggle').textContent=running?'⏸ Pausar':'▶ Continuar';say(running?'Simulação retomada.':'Simulação pausada.');};
+  $('speed').onclick=()=>{speed=speed===1?2:speed===2?4:1;$('speed').textContent='⏩ Velocidade: '+speed+'x';};
+  $('add').onclick=()=>{if(creatures.length<45){makeCreature();say('Uma nova bolinha apareceu!');updateStats();}else say('O mundo já está cheio de criaturas.');};
+  $('food').onclick=()=>{for(let i=0;i<8;i++)addFood();say('Oito pontinhos de comida foram adicionados!');updateStats();};
+  $('metal').onclick=()=>{for(let i=0;i<8;i++)addMetal();say('Oito metais foram adicionados!');updateStats();};
+  $('storm').onclick=()=>{storm=600;say('Um furacão começou!');};
+  $('quake').onclick=()=>{quake=240;say('Um terremoto começou!');};
+  $('restart').onclick=()=>reset();
+  canvas.addEventListener('click',e=>{
+    const r=canvas.getBoundingClientRect();
+    addFood((e.clientX-r.left)*W/r.width,(e.clientY-r.top)*H/r.height);
+    updateStats();say('Comida adicionada onde você tocou!');
+  });
+  reset(); requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
+While the code is focused, press Alt+F1 for a menu of operations.
+Copied!
